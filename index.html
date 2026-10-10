@@ -1,0 +1,479 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#172d28">
+<title>World Seasons Tracker</title>
+
+<style>
+:root {
+  --bg: #f4f6f0;
+  --card: #ffffff;
+  --ink: #20352d;
+  --muted: #68766d;
+  --line: #dce5dc;
+  --accent: #315e49;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+header {
+  padding: 38px 20px;
+  background: #172d28;
+  color: white;
+}
+.header-inner, main {
+  width: min(100% - 32px, 1000px);
+  margin: auto;
+}
+.eyebrow {
+  color: #b6d8bf;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-size: 12px;
+  font-weight: 700;
+}
+h1 { margin: 10px 0; font-size: clamp(30px, 6vw, 48px); }
+header p { color: #d6e4db; line-height: 1.6; max-width: 650px; }
+main { padding: 26px 0 48px; }
+.controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  padding: 20px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+label { display: block; font-size: 13px; font-weight: 700; }
+select, input, button {
+  font: inherit;
+  width: 100%;
+  margin-top: 7px;
+  padding: 12px;
+  border: 1px solid #cbd7cc;
+  border-radius: 10px;
+  background: white;
+  color: var(--ink);
+}
+button {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+button:hover { opacity: .9; }
+.summary {
+  margin: 20px 0;
+  padding: 18px;
+  border-radius: 14px;
+  background: #e6eee5;
+  line-height: 1.6;
+}
+h2 { margin-top: 30px; }
+.seasons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 15px;
+}
+.season {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px;
+  min-height: 205px;
+}
+.season .emoji { font-size: 30px; }
+.season h3 { margin: 10px 0 5px; }
+.date { font-weight: 750; font-size: 18px; margin: 12px 0 4px; }
+.small { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.status { margin: 18px 0; color: var(--muted); }
+.error { color: #a52b2b; }
+footer {
+  border-top: 1px solid var(--line);
+  margin-top: 30px;
+  padding-top: 20px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+a { color: var(--accent); }
+</style>
+</head>
+
+<body>
+<header>
+  <div class="header-inner">
+    <div class="eyebrow">Astronomy · Global calendar</div>
+    <h1>World Seasons Tracker 🌍</h1>
+    <p>
+      Explore astronomical season changes around the world.
+      Select a country and year to view equinoxes, solstices,
+      and the seasons they mark in that hemisphere.
+    </p>
+  </div>
+</header>
+
+<main>
+  <section class="controls">
+    <div>
+      <label for="country">Select country</label>
+      <select id="country">
+        <option value="">Loading countries…</option>
+      </select>
+    </div>
+    <div>
+      <label for="year">Select year (1700–2100)</label>
+      <input id="year" type="number" min="1700" max="2100">
+    </div>
+    <div>
+      <label>&nbsp;</label>
+      <button id="show">Show seasons</button>
+    </div>
+  </section>
+
+  <div id="status" class="status" role="status" aria-live="polite">
+    Loading country list…
+  </div>
+
+  <section id="summary" class="summary" hidden></section>
+
+  <section id="results" hidden>
+    <h2>Season transitions</h2>
+    <p class="small">
+      Each date marks the astronomical beginning of a season.
+      The end of that season is the beginning of the next one.
+    </p>
+    <div id="seasons" class="seasons"></div>
+  </section>
+
+  <footer>
+    <strong>About this tracker</strong><br>
+    Season boundaries are based on astronomical equinoxes and solstices,
+    not meteorological seasons. Season names depend on hemisphere.
+    A country's capital is used as the reference location, which is
+    only an approximation for countries spanning the Equator or multiple
+    time zones.<br><br>
+    Astronomical data:
+    <a href="https://aa.usno.navy.mil/data/api.html" target="_blank" rel="noopener">
+      US Naval Observatory API documentation
+    </a>.
+    Country information:
+    <a href="https://restcountries.com/" target="_blank" rel="noopener">
+      REST Countries
+    </a>.
+    Time zone lookup:
+    <a href="https://open-meteo.com/" target="_blank" rel="noopener">
+      Open-Meteo
+    </a>.
+  </footer>
+</main>
+
+<script>
+"use strict";
+
+const countrySelect = document.getElementById("country");
+const yearInput = document.getElementById("year");
+const statusBox = document.getElementById("status");
+const summary = document.getElementById("summary");
+const results = document.getElementById("results");
+const seasonsBox = document.getElementById("seasons");
+
+const currentYear = new Date().getFullYear();
+yearInput.value = Math.min(2100, Math.max(1700, currentYear));
+
+let countries = [];
+let requestNumber = 0;
+
+const SEASON_INFO = {
+  "Vernal Equinox": {
+    north: ["Spring", "🌱"],
+    south: ["Autumn", "🍂"]
+  },
+  "Summer Solstice": {
+    north: ["Summer", "☀️"],
+    south: ["Winter", "❄️"]
+  },
+  "Autumnal Equinox": {
+    north: ["Autumn", "🍂"],
+    south: ["Spring", "🌸"]
+  },
+  "Winter Solstice": {
+    north: ["Winter", "❄️"],
+    south: ["Summer", "☀️"]
+  }
+};
+
+function setStatus(message, isError = false) {
+  statusBox.textContent = message;
+  statusBox.className = isError ? "status error" : "status";
+}
+
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[char]);
+}
+
+async function loadCountries() {
+  setStatus("Loading country list…");
+
+  try {
+    const response = await fetch(
+      "https://restcountries.com/v3.1/all?fields=name,capital,latlng,cca2"
+    );
+    if (!response.ok) throw new Error("Country service unavailable");
+
+    const data = await response.json();
+
+    countries = data
+      .filter(c =>
+        c.name?.common &&
+        c.capital?.[0] &&
+        Array.isArray(c.latlng) &&
+        c.latlng.length === 2
+      )
+      .map(c => ({
+        name: c.name.common,
+        capital: c.capital[0],
+        lat: Number(c.latlng[0]),
+        lon: Number(c.latlng[1]),
+        code: c.cca2 || ""
+      }))
+      .filter(c => Number.isFinite(c.lat) && Number.isFinite(c.lon))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    if (!countries.length) throw new Error("No countries returned");
+
+    countrySelect.replaceChildren();
+    countries.forEach((country, index) => {
+      const option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = country.name;
+      countrySelect.appendChild(option);
+    });
+
+    const preferred = countries.findIndex(c => c.code === "IN");
+    if (preferred >= 0) countrySelect.value = String(preferred);
+
+    setStatus("Country list ready. Choose a year and select Show seasons.");
+  } catch (error) {
+    // Small offline fallback if the country service cannot be reached.
+    countries = [
+      { name: "India", capital: "New Delhi", lat: 28.6139, lon: 77.2090, code: "IN" },
+      { name: "United States", capital: "Washington, D.C.", lat: 38.9072, lon: -77.0369, code: "US" },
+      { name: "United Kingdom", capital: "London", lat: 51.5072, lon: -0.1276, code: "GB" },
+      { name: "Australia", capital: "Canberra", lat: -35.2809, lon: 149.1300, code: "AU" },
+      { name: "Japan", capital: "Tokyo", lat: 35.6762, lon: 139.6503, code: "JP" },
+      { name: "Brazil", capital: "Brasília", lat: -15.7939, lon: -47.8828, code: "BR" },
+      { name: "South Africa", capital: "Pretoria", lat: -25.7479, lon: 28.2293, code: "ZA" },
+      { name: "New Zealand", capital: "Wellington", lat: -41.2866, lon: 174.7756, code: "NZ" },
+      { name: "Singapore", capital: "Singapore", lat: 1.3521, lon: 103.8198, code: "SG" },
+      { name: "Kenya", capital: "Nairobi", lat: -1.2921, lon: 36.8219, code: "KE" },
+      { name: "Mexico", capital: "Mexico City", lat: 19.4326, lon: -99.1332, code: "MX" },
+      { name: "France", capital: "Paris", lat: 48.8566, lon: 2.3522, code: "FR" }
+    ];
+
+    countrySelect.replaceChildren();
+    countries.forEach((country, index) => {
+      const option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = country.name;
+      countrySelect.appendChild(option);
+    });
+    countrySelect.value = "0";
+
+    setStatus(
+      "The full country list could not be loaded. A small fallback list is available; check your connection for the full list."
+    );
+  }
+}
+
+async function getTimeZone(country) {
+  const url = new URL("https://api.open-meteo.com/v1/forecast");
+  url.searchParams.set("latitude", country.lat);
+  url.searchParams.set("longitude", country.lon);
+  url.searchParams.set("current", "temperature_2m");
+  url.searchParams.set("timezone", "auto");
+
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Could not look up the capital's time zone.");
+
+  const data = await response.json();
+  if (!data.timezone) throw new Error("Time zone information was missing.");
+  return data.timezone;
+}
+
+async function getSeasonEvents(year) {
+  const url = `https://aa.usno.navy.mil/api/seasons?year=${year}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Astronomy service returned ${response.status}.`);
+
+  const payload = await response.json();
+  if (payload.error) throw new Error(payload.error);
+
+  if (!Array.isArray(payload.data)) {
+    throw new Error("Unexpected response from the astronomy service.");
+  }
+
+  return payload.data
+    .filter(item => SEASON_INFO[item.phenom])
+    .map(item => {
+      const timeParts = String(item.time || "00:00").match(/^(\d{1,2}):(\d{2})/);
+      if (!timeParts) throw new Error("An event has an invalid time.");
+
+      // USNO season events are returned in Universal Time.
+      const date = new Date(Date.UTC(
+        Number(item.year),
+        Number(item.month) - 1,
+        Number(item.day),
+        Number(timeParts[1]),
+        Number(timeParts[2])
+      ));
+
+      if (Number.isNaN(date.getTime())) {
+        throw new Error("An event has an invalid date.");
+      }
+
+      return { name: item.phenom, date };
+    });
+}
+
+function formatLocal(date, timeZone) {
+  return new Intl.DateTimeFormat("en", {
+    timeZone,
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  }).format(date);
+}
+
+function formatLocalTime(date, timeZone) {
+  return new Intl.DateTimeFormat("en", {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short"
+  }).format(date);
+}
+
+function localYear(date, timeZone) {
+  return Number(new Intl.DateTimeFormat("en", {
+    timeZone,
+    year: "numeric"
+  }).format(date));
+}
+
+async function showSeasons() {
+  const thisRequest = ++requestNumber;
+  results.hidden = true;
+  summary.hidden = true;
+  seasonsBox.replaceChildren();
+
+  const year = Number(yearInput.value);
+  if (!Number.isInteger(year) || year < 1700 || year > 2100) {
+    setStatus("Please enter a year between 1700 and 2100.", true);
+    return;
+  }
+
+  const country = countries[Number(countrySelect.value)];
+  if (!country) {
+    setStatus("Please select a country.", true);
+    return;
+  }
+
+  setStatus("Calculating astronomical seasons…");
+
+  try {
+    const [timeZone, previousEvents, thisYearEvents, nextEvents] =
+      await Promise.all([
+        getTimeZone(country),
+        getSeasonEvents(year - 1),
+        getSeasonEvents(year),
+        getSeasonEvents(year + 1)
+      ]);
+
+    if (thisRequest !== requestNumber) return;
+
+    const hemisphere = country.lat >= 0 ? "north" : "south";
+    const allEvents = [
+      ...previousEvents,
+      ...thisYearEvents,
+      ...nextEvents
+    ].sort((a, b) => a.date - b.date);
+
+    // Use the local year at the selected capital. This handles events
+    // that fall on a different calendar date in the capital's time zone.
+    const events = allEvents.filter(event =>
+      localYear(event.date, timeZone) === year
+    );
+
+    if (!events.length) {
+      throw new Error("No season transitions were found for that year.");
+    }
+
+    summary.hidden = false;
+    summary.innerHTML = `
+      <strong>${escapeHTML(country.name)}</strong> ·
+      Capital reference: ${escapeHTML(country.capital)}<br>
+      <strong>Hemisphere:</strong> ${hemisphere === "north" ? "Northern" : "Southern"}<br>
+      <strong>Local time zone:</strong> ${escapeHTML(timeZone)}<br>
+      <span class="small">
+        Dates and times below are converted from the astronomical event time
+        to the capital's local time.
+      </span>`;
+
+    const cards = events.map(event => {
+      const info = SEASON_INFO[event.name][hemisphere];
+      const [season, emoji] = info;
+
+      const nextEvent = allEvents.find(e => e.date > event.date);
+      const endText = nextEvent
+        ? `${formatLocal(nextEvent.date, timeZone)} · ${formatLocalTime(nextEvent.date, timeZone)}`
+        : "Not available";
+
+      return `
+        <article class="season">
+          <div class="emoji" aria-hidden="true">${emoji}</div>
+          <h3>${escapeHTML(season)}</h3>
+          <div class="small">${escapeHTML(event.name)}</div>
+          <div class="date">${escapeHTML(formatLocal(event.date, timeZone))}</div>
+          <div class="small">Begins at ${escapeHTML(formatLocalTime(event.date, timeZone))}</div>
+          <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+          <div class="small"><strong>Next season begins</strong></div>
+          <div class="small">${escapeHTML(endText)}</div>
+        </article>`;
+    });
+
+    seasonsBox.innerHTML = cards.join("");
+    results.hidden = false;
+    setStatus(`Showing ${events.length} astronomical transitions for ${year}.`);
+  } catch (error) {
+    if (thisRequest !== requestNumber) return;
+    setStatus(
+      `${error.message || "Something went wrong."} Check your internet connection and try again.`,
+      true
+    );
+  }
+}
+
+document.getElementById("show").addEventListener("click", showSeasons);
+yearInput.addEventListener("keydown", event => {
+  if (event.key === "Enter") showSeasons();
+});
+
+loadCountries();
+</script>
+</body>
+</html>
